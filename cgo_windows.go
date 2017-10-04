@@ -18,13 +18,13 @@ import (
 func nativeLoop() {
 	C.nativeLoop()
 }
+
 var prevIconPath string
+
 func quit() {
 	os.Remove(prevIconPath)
 	C.quit()
 }
-
-
 
 func SetIcon(iconBytes []byte) {
 	f, err := ioutil.TempFile("", "systray_temp_icon")

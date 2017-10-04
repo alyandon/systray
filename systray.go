@@ -37,7 +37,7 @@ var (
 	readyCh       = make(chan interface{})
 	clickedCh     = make(chan interface{})
 	menuItems     = make(map[int32]*MenuItem)
-	menuItemsLock sync.RWMutex
+	menuItemsLock sync.Mutex
 
 	currentID int32
 )
@@ -61,11 +61,13 @@ func Quit() {
 	quit()
 }
 
-// AddMenuItem adds menu item with designated title and tooltip, returning a channel 
+// AddMenuItem adds menu item with designated title and tooltip, returning a channel
 // that notifies whenever that menu item is clicked.
 //
 // It can be safely invoked from different goroutines.
 func AddMenuItem(title string, tooltip string) *MenuItem {
+	menuItemsLock.Lock()
+	defer menuItemsLock.Unlock()
 	id := atomic.AddInt32(&currentID, 1)
 	item := &MenuItem{nil, id, title, tooltip, false, false}
 	item.ClickedCh = make(chan interface{})
@@ -75,54 +77,68 @@ func AddMenuItem(title string, tooltip string) *MenuItem {
 
 // SetTitle set the text to display on a menu item
 func (item *MenuItem) SetTitle(title string) {
+	menuItemsLock.Lock()
+	defer menuItemsLock.Unlock()
 	item.title = title
 	item.update()
 }
 
 // SetTooltip set the tooltip to show when mouse hover
 func (item *MenuItem) SetTooltip(tooltip string) {
+	menuItemsLock.Lock()
+	defer menuItemsLock.Unlock()
 	item.tooltip = tooltip
 	item.update()
 }
 
 // Disabled checkes if the menu item is disabled
 func (item *MenuItem) Disabled() bool {
+	menuItemsLock.Lock()
+	defer menuItemsLock.Unlock()
 	return item.disabled
 }
 
 // Enable a menu item regardless if it's previously enabled or not
 func (item *MenuItem) Enable() {
+	menuItemsLock.Lock()
+	defer menuItemsLock.Unlock()
 	item.disabled = false
 	item.update()
 }
 
 // Disable a menu item regardless if it's previously disabled or not
 func (item *MenuItem) Disable() {
+	menuItemsLock.Lock()
+	defer menuItemsLock.Unlock()
 	item.disabled = true
 	item.update()
 }
 
 // Checked returns if the menu item has a check mark
 func (item *MenuItem) Checked() bool {
+	menuItemsLock.Lock()
+	defer menuItemsLock.Unlock()
 	return item.checked
 }
 
 // Check a menu item regardless if it's previously checked or not
 func (item *MenuItem) Check() {
+	menuItemsLock.Lock()
+	defer menuItemsLock.Unlock()
 	item.checked = true
 	item.update()
 }
 
 // Uncheck a menu item regardless if it's previously unchecked or not
 func (item *MenuItem) Uncheck() {
+	menuItemsLock.Lock()
+	defer menuItemsLock.Unlock()
 	item.checked = false
 	item.update()
 }
 
 // update propogates changes on a menu item to systray
 func (item *MenuItem) update() {
-	menuItemsLock.Lock()
-	defer menuItemsLock.Unlock()
 	menuItems[item.id] = item
 	addOrUpdateMenuItem(item)
 }
@@ -131,13 +147,20 @@ func systrayReady() {
 	readyCh <- nil
 }
 
-func systrayMenuItemSelected(id int32) {
-	menuItemsLock.RLock()
+func systrayMenuItemSelectedDelegate(id int32) {
+	menuItemsLock.Lock()
 	item := menuItems[id]
-	menuItemsLock.RUnlock()
+	menuItemsLock.Unlock()
 	select {
 	case item.ClickedCh <- nil:
 	// in case no one waiting for the channel
 	default:
 	}
+}
+
+func systrayMenuItemSelected(id int32) {
+	// systray deadlocks itself on macos when an update is occuring and a
+	// another event is triggered.  Use a delegate instead of trying to
+	// obtain a lock while inside the native thread
+	go systrayMenuItemSelectedDelegate(id)
 }
